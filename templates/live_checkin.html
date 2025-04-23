@@ -81,7 +81,7 @@
 
     async function setupCamera() {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } }); 
             video.srcObject = stream;
             video.onloadedmetadata = () => {
                 overlay.width = video.videoWidth;
@@ -94,7 +94,7 @@
                 checkInBtn.disabled = true;
                 checkOutBtn.disabled = true;
 
-                recognizeIntervalId = setInterval(recognizeFrame, 500);
+                recognizeIntervalId = setInterval(recognizeFrame, 3500);
                 updateStatusIntervalId = setInterval(updateStatusDisplay, 1000);
             };
         } catch (err) {
