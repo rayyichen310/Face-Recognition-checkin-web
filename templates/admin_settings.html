@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}管理設定{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">應用程式設定</h2>
+
+    <!-- **** 直接嵌入 Flash 訊息顯示邏輯 **** -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category else 'info' }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <!-- **** 結束嵌入 **** -->
+
+    <div class="alert alert-warning" role="alert">
+        <strong>注意：</strong> 更改某些設定（例如模型路徑、資料庫路徑、偵測/追蹤信心度）可能需要重新啟動伺服器才能完全生效。
+    </div>
+
+    <form method="POST" action="{{ url_for('admin_settings') }}">
+        <table class="table table-bordered table-striped">
+            <thead class="thead-light">
+                <tr>
+                    <th>設定項 (Key)</th>
+                    <th>目前值 (Value)</th>
+                    <th>類型 (Type)</th>
+                    <th>新值 (New Value)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {# --- 只顯示指定的設定項 --- #}
+                {% set allowed_keys = ['blur_threshold', 'ratio_diff_threshold', 'recognition_threshold', 'min_detection_confidence', 'min_tracking_confidence', 'onnx_model_filename'] %}
+                {% for key, value in current_settings.items() %}
+                  {% if key in allowed_keys %}
+                    <tr>
+                        <td>
+                            <code>{{ key }}</code>
+                            {% if key in ['min_detection_confidence', 'min_tracking_confidence', 'onnx_model_filename'] %}
+                                <br><small class="text-warning">(需要重啟)</small>
+                            {% endif %}
+                        </td>
+                        <td><code>{{ value }}</code></td>
+                        <td><code>{{ value.__class__.__name__ }}</code></td>
+                        <td>
+                            {% if value is boolean %}
+                                <select class="form-control" name="{{ key }}">
+                                    <option value="True" {% if value %}selected{% endif %}>True</option>
+                                    <option value="False" {% if not value %}selected{% endif %}>False</option>
+                                </select>
+                            {% elif value is number %}
+                                {% if key in ['recognition_threshold', 'min_detection_confidence', 'min_tracking_confidence', 'ratio_diff_threshold'] %}
+                                    <input type="number" step="0.01" min="0.0" max="1.0" class="form-control" name="{{ key }}" value="{{ value }}">
+                                {% elif key == 'blur_threshold' %}
+                                     <input type="number" step="1" min="0" class="form-control" name="{{ key }}" value="{{ value }}">
+                                {% else %}
+                                    <input type="number" step="any" class="form-control" name="{{ key }}" value="{{ value }}">
+                                {% endif %}
+                            {% else %}
+                                <input type="text" class="form-control" name="{{ key }}" value="{{ value }}">
+                            {% endif %}
+                        </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+                {# --- 結束只顯示指定的設定項 --- #}
+            </tbody>
+        </table>
+        <button type="submit" class="btn btn-primary">儲存變更</button>
+        <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary">返回儀表板</a>
+    </form>
+</div>
+{% endblock %}

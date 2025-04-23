@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}使用者管理{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="text-center mb-4">使用者管理</h2>
+
+    <!-- 新增使用者表單 -->
+    <div class="card mb-4">
+        <div class="card-header">新增使用者帳號</div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_users') }}">
+                <input type="hidden" name="action" value="add_user">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md">
+                        <label for="new_username" class="form-label">使用者名稱</label>
+                        <input type="text" class="form-control" id="new_username" name="username" required>
+                    </div>
+                    <div class="col-md">
+                        <label for="new_password" class="form-label">密碼 (至少 6 字元)</label>
+                        <input type="password" class="form-control" id="new_password" name="password" required minlength="6">
+                    </div>
+                    <div class="col-md-auto">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="is_admin" name="is_admin">
+                            <label class="form-check-label" for="is_admin">設為管理員</label>
+                        </div>
+                    </div>
+                    <div class="col-md-auto">
+                        <button type="submit" class="btn btn-success">新增帳號</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 上傳臉部照片表單 (保持不變) -->
+    <div class="card mb-4">
+        <div class="card-header">為現有使用者添加臉部照片</div>
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('admin_users') }}" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="add_face">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md">
+                        <label for="username_for_face" class="form-label">選擇使用者</label>
+                        <select class="form-select" id="username_for_face" name="username_for_face" required>
+                            <option value="" disabled selected>-- 請選擇 --</option>
+                            {% for user in users %}
+                                <option value="{{ user.username }}">{{ user.username }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md">
+                        <label for="face_image" class="form-label">上傳臉部照片 (JPG/PNG)</label>
+                        <input class="form-control" type="file" id="face_image" name="face_image" accept=".jpg, .jpeg, .png" required>
+                    </div>
+                    <div class="col-md-auto">
+                        <button type="submit" class="btn btn-primary">上傳並添加臉部</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 使用者列表 -->
+    <h3 class="mt-5 mb-3">現有使用者</h3>
+    {% if users %}
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-sm align-middle"> <!-- 新增 align-middle -->
+                <thead>
+                    <tr>
+                        <th scope="col">照片</th> <!-- 新增照片欄位標頭 -->
+                        <th scope="col">ID</th>
+                        <th scope="col">使用者名稱</th>
+                        <th scope="col">管理員</th>
+                        <th scope="col">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>
+                            <!-- 新增：顯示使用者照片 -->
+                            <img src="{{ url_for('serve_user_photo', username=user.username) }}"
+                                 alt="{{ user.username }} photo"
+                                 width="40" height="40"
+                                 style="object-fit: cover; border-radius: 50%;">
+                        </td>
+                        <td>{{ user.id }}</td>
+                        <td>{{ user.username }}</td>
+                        <td>{% if user.is_admin %}是{% else %}否{% endif %}</td>
+                        <td>
+                            {% if user.username != session.get('username') %} {# 防止刪除自己 #}
+                                <form method="POST" action="{{ url_for('delete_user_route', username=user.username) }}" style="display: inline;" onsubmit="return confirm('確定要刪除使用者 {{ user.username }} 及其所有臉部資料嗎？此操作無法復原！');">
+                                    <button type="submit" class="btn btn-danger btn-sm">刪除</button>
+                                </form>
+                            {% else %}
+                                <button type="button" class="btn btn-secondary btn-sm" disabled>刪除 (自己)</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-info" role="alert">
+            目前沒有已註冊的使用者。
+        </div>
+    {% endif %}
+
+    <a href="{{ url_for('admin_dashboard') }}" class="btn btn-secondary mt-3">返回管理員儀表板</a>
+</div>
+{% endblock %}

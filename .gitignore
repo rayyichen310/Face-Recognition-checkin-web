@@ -1,0 +1,20 @@
+# 忽略 Python 編譯檔案
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 忽略 database 資料夾內的內容，但保留 .gitkeep
+database/*
+!database/.gitkeep
+
+# 忽略 dataset 資料夾內的內容，但保留 .gitkeep
+dataset/*
+!dataset/.gitkeep
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env
+secrets.json

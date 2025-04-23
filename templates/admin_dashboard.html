@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}管理員後台{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">管理員儀表板</h2>
+<p>歡迎, {{ username }}!</p>
+
+<div class="list-group">
+    <a href="{{ url_for('admin_users') }}" class="list-group-item list-group-item-action">
+        使用者管理 (新增/刪除帳號、管理臉部資料)
+    </a>
+    <a href="{{ url_for('admin_records') }}" class="list-group-item list-group-item-action">
+        查看所有打卡紀錄
+    </a>
+    <!-- **** 新增設定連結 **** -->
+    <a href="{{ url_for('admin_settings') }}" class="list-group-item list-group-item-action">
+        管理應用程式設定
+    </a>
+    <!-- **** 結束新增 **** -->
+     <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action list-group-item-secondary">
+        返回首頁
+    </a>
+</div>
+{% endblock %}

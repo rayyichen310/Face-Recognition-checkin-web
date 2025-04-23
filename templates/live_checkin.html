@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+
+{% block title %}即時打卡{% endblock %}
+
+{% block head_extra %}
+<style>
+    #video-container {
+        position: relative;
+        width: 640px; /* Or your desired width */
+        height: 480px; /* Or your desired height */
+        margin: 20px auto;
+        border: 1px solid #ccc;
+    }
+    #videoElement {
+        width: 100%;
+        height: 100%;
+        object-fit: cover; /* Cover the container */
+    }
+    #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none; /* Allow clicks to go through to video if needed */
+    }
+    .bbox {
+        position: absolute;
+        border: 2px solid red;
+        box-sizing: border-box;
+    }
+    .bbox-label {
+        position: absolute;
+        background-color: red;
+        color: white;
+        font-size: 12px;
+        padding: 2px 4px;
+        white-space: nowrap;
+    }
+    #status {
+        text-align: center;
+        margin-top: 10px;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="text-center mb-4">即時臉部辨識打卡</h2>
+
+<div id="video-container">
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="overlay"></canvas>
+</div>
+<div id="status" class="alert alert-info" role="alert">正在啟動攝影機...</div>
+<div id="recognized-name" class="alert alert-secondary" role="alert">辨識結果：</div>
+
+<div class="text-center mt-3">
+    <button id="checkInBtn" class="btn btn-success" disabled>上班打卡</button>
+    <button id="checkOutBtn" class="btn btn-warning" disabled>下班打卡</button>
+</div>
+
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    const video = document.getElementById('videoElement');
+    const overlay = document.getElementById('overlay');
+    const overlayCtx = overlay.getContext('2d');
+    const statusDiv = document.getElementById('status'); // 下方框 (將顯示辨識狀態)
+    const recognizedNameElement = document.getElementById('recognized-name'); // 上方框 (將顯示打卡狀態)
+    const checkInBtn = document.getElementById('checkInBtn');
+    const checkOutBtn = document.getElementById('checkOutBtn');
+    let currentRecognizedName = null;
+    let stream = null;
+    let latestPositions = [];
+    let latestTexts = [];
+    let lastRecognitionStatus = 'pending';
+    let recognizeIntervalId = null;
+    let updateStatusIntervalId = null;
+
+    async function setupCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+                // 初始狀態調整
+                recognizedNameElement.textContent = '打卡狀態：等待辨識...'; // 上方框初始文字
+                recognizedNameElement.className = 'alert alert-info'; // 上方框初始樣式
+                statusDiv.textContent = '辨識結果：正在啟動...'; // 下方框初始文字
+                statusDiv.className = 'alert alert-info'; // 下方框初始樣式
+                checkInBtn.disabled = true;
+                checkOutBtn.disabled = true;
+
+                recognizeIntervalId = setInterval(recognizeFrame, 500);
+                updateStatusIntervalId = setInterval(updateStatusDisplay, 1000);
+            };
+        } catch (err) {
+            console.error("Error accessing camera: ", err);
+            // 錯誤狀態調整
+            recognizedNameElement.textContent = '打卡狀態：錯誤'; // 上方框
+            recognizedNameElement.className = 'alert alert-danger'; // 上方框
+            statusDiv.textContent = '辨識結果：無法啟動攝影機: ' + err.message; // 下方框
+            statusDiv.className = 'alert alert-danger'; // 下方框
+            lastRecognitionStatus = 'error';
+            checkInBtn.disabled = true;
+            checkOutBtn.disabled = true;
+        }
+    }
+
+    function drawBoundingBoxes() {
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        const positions = latestPositions;
+        const texts = latestTexts;
+
+        if (positions && positions.length > 0 && texts && texts.length === positions.length) {
+            positions.forEach((position, index) => {
+                const text = texts[index];
+                let name = "Unknown";
+                let similarity = null;
+
+                if (text && typeof text === 'string') {
+                    const parts = text.split(':');
+                    name = parts[0].trim();
+                    if (parts.length > 1) {
+                        similarity = parts[1].trim();
+                    }
+                }
+
+                if (position && position.length === 4) {
+                    const [x1, y1, x2, y2] = position;
+                    const width = x2 - x1;
+                    const height = y2 - y1;
+                    const color = (name === "Unknown" || name.includes("Error")) ? 'yellow' : 'lime';
+
+                    overlayCtx.strokeStyle = color;
+                    overlayCtx.lineWidth = 2;
+                    overlayCtx.strokeRect(x1, y1, width, height);
+
+                    const label = `${name}${similarity ? ': ' + similarity : ''}`;
+                    overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                    overlayCtx.font = '16px Arial';
+                    const textMetrics = overlayCtx.measureText(label);
+                    const textHeight = 16;
+                    const bgPadding = 2;
+
+                    overlayCtx.fillRect(
+                        x1,
+                        y1 > (textHeight + bgPadding * 2) ? y1 - textHeight - bgPadding * 2 : y1 + bgPadding,
+                        textMetrics.width + bgPadding * 2,
+                        textHeight + bgPadding
+                    );
+
+                    overlayCtx.fillStyle = color;
+                    overlayCtx.fillText(label, x1 + bgPadding, y1 > (textHeight + bgPadding * 2) ? y1 - bgPadding : y1 + textHeight);
+                }
+            });
+        }
+    }
+
+    function updateStatusDisplay() {
+        let foundRecognized = false;
+        let primaryName = null;
+        const positions = latestPositions;
+        const texts = latestTexts;
+
+        if (positions && positions.length > 0 && texts && texts.length === positions.length) {
+             texts.forEach((text) => {
+                 if (!primaryName && text && typeof text === 'string') {
+                     const name = text.split(':')[0].trim();
+                     if (name !== "Unknown" && !name.includes("Error")) {
+                         primaryName = name;
+                         foundRecognized = true;
+                     }
+                 }
+             });
+        }
+
+        if (lastRecognitionStatus === 'failed_request') {
+             currentRecognizedName = null;
+             statusDiv.textContent = '辨識結果：請求失敗'; // <--- 更新下方框文字
+             recognizedNameElement.className = 'alert alert-warning'; // <--- 更新上方框 class
+             checkInBtn.disabled = true;
+             checkOutBtn.disabled = true;
+        } else if (lastRecognitionStatus === 'error' && !(stream && stream.active)) {
+             currentRecognizedName = null;
+             statusDiv.textContent = '辨識結果：攝影機錯誤'; // <--- 更新下方框文字
+             recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
+             checkInBtn.disabled = true;
+             checkOutBtn.disabled = true;
+        } else if (lastRecognitionStatus === 'error') {
+             currentRecognizedName = null;
+             statusDiv.textContent = '辨識結果：錯誤'; // <--- 更新下方框文字
+             recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
+             checkInBtn.disabled = true;
+             checkOutBtn.disabled = true;
+        } else if (foundRecognized) {
+            currentRecognizedName = primaryName;
+            statusDiv.textContent = `辨識結果：${primaryName} (辨識完成)`; // <--- 更新下方框文字
+            recognizedNameElement.className = 'alert alert-success'; // <--- 更新上方框 class
+            checkInBtn.disabled = false;
+            checkOutBtn.disabled = false;
+        } else if (texts && texts.some(t => t && t.includes("Unknown"))) {
+            currentRecognizedName = null;
+            statusDiv.textContent = '辨識結果：Unknown (未辨識到已知人員)'; // <--- 更新下方框文字
+            recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
+            checkInBtn.disabled = true;
+            checkOutBtn.disabled = true;
+        } else if (texts && texts.length === 0 && positions && positions.length === 0 && lastRecognitionStatus === 'success') {
+             currentRecognizedName = null;
+             statusDiv.textContent = '辨識結果：未偵測到人臉'; // <--- 更新下方框文字
+             recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
+             checkInBtn.disabled = true;
+             checkOutBtn.disabled = true;
+        } else if (lastRecognitionStatus === 'pending' || (lastRecognitionStatus === 'success' && texts.length === 0 && positions.length === 0)) {
+             currentRecognizedName = null;
+             statusDiv.textContent = '辨識結果：正在辨識...'; // <--- 更新下方框文字
+             recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
+             checkInBtn.disabled = true;
+             checkOutBtn.disabled = true;
+        }
+        if (!recognizedNameElement.textContent.startsWith('打卡狀態：')) {
+             recognizedNameElement.textContent = '打卡狀態：等待操作...';
+        }
+    }
+
+    async function recognizeFrame() {
+        if (!video || video.readyState < video.HAVE_METADATA || video.paused || video.ended) {
+            return;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+
+        try {
+            const response = await fetch('/recognize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl }),
+            });
+
+            if (!response.ok) {
+                console.error('Recognition request failed:', response.statusText);
+                lastRecognitionStatus = 'failed_request';
+                latestPositions = [];
+                latestTexts = [];
+            } else {
+                const data = await response.json();
+                latestPositions = data.positions || [];
+                latestTexts = data.texts || [];
+                lastRecognitionStatus = 'success';
+            }
+
+        } catch (error) {
+            console.error('Error sending frame for recognition:', error);
+            lastRecognitionStatus = 'error';
+            latestPositions = [];
+            latestTexts = [];
+        } finally {
+             drawBoundingBoxes();
+        }
+    }
+
+    async function sendCheckIn(type) {
+        if (!currentRecognizedName) {
+            recognizedNameElement.textContent = '打卡狀態：無法打卡，未辨識到有效人員。'; // <--- 更新上方框文字
+            recognizedNameElement.className = 'alert alert-warning'; // <--- 更新上方框 class
+            return;
+        }
+
+        checkInBtn.disabled = true;
+        checkOutBtn.disabled = true;
+        recognizedNameElement.textContent = `打卡狀態：正在為 ${currentRecognizedName} 執行打${type === 'in' ? '卡' : '卡'}...`; // <--- 更新上方框文字
+        recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
+
+        try {
+            const response = await fetch('/check_in', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: currentRecognizedName, type: type }),
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                recognizedNameElement.textContent = `打卡狀態：${data.message}`; // <--- 更新上方框文字 (顯示成功訊息)
+                recognizedNameElement.className = 'alert alert-success'; // <--- 更新上方框 class
+            } else {
+                recognizedNameElement.textContent = `打卡狀態：打卡失敗: ${data.message}`; // <--- 更新上方框文字 (顯示失敗訊息)
+                recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
+                updateStatusDisplay();
+            }
+        } catch (error) {
+            console.error('Error sending check-in:', error);
+            recognizedNameElement.textContent = '打卡狀態：打卡請求失敗'; // <--- 更新上方框文字 (顯示請求失敗訊息)
+            recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
+            updateStatusDisplay();
+        }
+    }
+
+    checkInBtn.addEventListener('click', () => sendCheckIn('in'));
+    checkOutBtn.addEventListener('click', () => sendCheckIn('out'));
+
+    setupCamera();
+
+    window.addEventListener('beforeunload', () => {
+        if (recognizeIntervalId) clearInterval(recognizeIntervalId);
+        if (updateStatusIntervalId) clearInterval(updateStatusIntervalId);
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    });
+
+</script>
+{% endblock %}

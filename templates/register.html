@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}註冊新帳號{% endblock %}
+
+{% block styles_extra %}
+<style>
+    #video-container {
+        position: relative;
+        width: 320px; /* 縮小尺寸 */
+        height: 240px; /* 縮小尺寸 */
+        margin: 10px auto; /* 置中 */
+        border: 1px solid #ccc;
+        background-color: #000;
+    }
+    #videoElement, #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
+    #overlay {
+        pointer-events: none; /* 允許點擊穿透 canvas */
+    }
+    #capture-preview-area {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 15px;
+        justify-content: center;
+    }
+    .preview-image {
+        width: 80px;
+        height: 60px;
+        border: 1px solid #ddd;
+        object-fit: cover;
+    }
+    .capture-controls {
+        text-align: center;
+        margin-top: 15px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <h2 class="text-center mb-4">註冊新帳號</h2>
+
+            <form method="POST" action="{{ url_for('register') }}" id="registerForm">
+                <div class="mb-3">
+                    <label for="username" class="form-label">使用者名稱</label>
+                    <input type="text" class="form-control" id="username" name="username" required>
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密碼 (至少 6 個字元)</label>
+                    <input type="password" class="form-control" id="password" name="password" required minlength="6">
+                </div>
+                <div class="mb-3">
+                    <label for="confirm_password" class="form-label">確認密碼</label>
+                    <input type="password" class="form-control" id="confirm_password" name="confirm_password" required minlength="6">
+                </div>
+
+                <hr>
+                <h5 class="text-center">臉部資料註冊 (請提供 3 個不同角度)</h5>
+                <p class="text-center text-muted small">請確保光線充足、臉部清晰且位於畫面中央。</p>
+
+                <!-- 攝影機畫面 -->
+                <div id="video-container">
+                    <video id="videoElement" autoplay playsinline></video>
+                    <canvas id="overlay"></canvas> <!-- 用於繪製提示框 (可選) -->
+                </div>
+                <div id="capture-status" class="text-center small text-info">正在啟動攝影機...</div>
+
+                <!-- 擷取控制與預覽 -->
+                <div class="capture-controls">
+                    <button type="button" id="captureBtn" class="btn btn-primary" disabled>擷取臉部照片 (0 / 3)</button>
+                </div>
+                <div id="capture-preview-area">
+                    <!-- 擷取的預覽圖會顯示在這裡 -->
+                </div>
+
+                <!-- 隱藏欄位，儲存所有 Base64 影像的 JSON 字串 -->
+                <input type="hidden" name="face_images_base64_json" id="faceImagesJson">
+
+                <div class="d-grid gap-2 mt-4">
+                    <button type="submit" id="registerBtn" class="btn btn-success" disabled>註冊</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    const video = document.getElementById('videoElement');
+    const overlay = document.getElementById('overlay');
+    const overlayCtx = overlay.getContext('2d');
+    const captureBtn = document.getElementById('captureBtn');
+    const captureStatus = document.getElementById('capture-status');
+    const previewArea = document.getElementById('capture-preview-area');
+    const hiddenInput = document.getElementById('faceImagesJson');
+    const registerForm = document.getElementById('registerForm');
+    const registerBtn = document.getElementById('registerBtn');
+
+    let stream = null;
+    let acceptedPhotos = [];
+    let acceptedRatios = [];
+    const REQUIRED_CAPTURES = 3;
+
+    async function setupCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+                captureBtn.disabled = false;
+                captureStatus.textContent = '攝影機已就緒，請將臉部對準畫面中央。';
+                captureStatus.className = 'text-center small text-success';
+                updateCaptureButtonText();
+            };
+        } catch (err) {
+            console.error("Error accessing camera: ", err);
+            captureStatus.textContent = '無法啟動攝影機: ' + err.message;
+            captureStatus.className = 'text-center small text-danger';
+            captureBtn.disabled = true;
+        }
+    }
+
+    function updateCaptureButtonText() {
+        captureBtn.textContent = `擷取臉部照片 (${acceptedPhotos.length} / ${REQUIRED_CAPTURES})`;
+    }
+
+    function updatePreview() {
+        previewArea.innerHTML = '';
+        acceptedPhotos.forEach((base64String, index) => {
+            const img = document.createElement('img');
+            img.src = base64String;
+            img.classList.add('preview-image');
+            img.alt = `合格照片 ${index + 1}`;
+            previewArea.appendChild(img);
+        });
+
+        updateCaptureButtonText();
+
+        if (acceptedPhotos.length >= REQUIRED_CAPTURES) {
+            captureBtn.disabled = true;
+            registerBtn.disabled = false;
+            captureStatus.textContent = `已完成 ${REQUIRED_CAPTURES} 張合格照片拍攝，請填寫資料後註冊。`;
+            captureStatus.className = 'text-center small text-success';
+        } else {
+            captureBtn.disabled = false;
+            registerBtn.disabled = true;
+            if (captureStatus.className.includes('text-warning') || captureStatus.className.includes('text-danger')) {
+                captureStatus.textContent = `請繼續擷取不同角度 (${acceptedPhotos.length} / ${REQUIRED_CAPTURES})。`;
+                captureStatus.className = 'text-center small text-info';
+            }
+        }
+    }
+
+    captureBtn.addEventListener('click', () => {
+        if (!stream || !stream.active || acceptedPhotos.length >= REQUIRED_CAPTURES) {
+            return;
+        }
+
+        captureBtn.disabled = true;
+        captureStatus.textContent = '正在驗證照片...';
+        captureStatus.className = 'text-center small text-muted';
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = video.videoWidth;
+        tempCanvas.height = video.videoHeight;
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+        const base64String = tempCanvas.toDataURL('image/jpeg', 0.9);
+
+        fetch('/validate_registration_photo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_base64: base64String,
+                accepted_ratios: acceptedRatios
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`伺服器錯誤: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            captureStatus.textContent = data.message;
+
+            if (data.status === 'success') {
+                acceptedPhotos.push(base64String);
+                acceptedRatios.push(data.ratio);
+                captureStatus.className = 'text-center small text-success';
+                updatePreview();
+            } else {
+                captureStatus.className = 'text-center small text-danger';
+                captureBtn.disabled = false;
+                updateCaptureButtonText();
+            }
+        })
+        .catch(error => {
+            console.error("Error validating photo: ", error);
+            captureStatus.textContent = `驗證照片時發生錯誤: ${error.message}，請重試。`;
+            captureStatus.className = 'text-center small text-danger';
+            captureBtn.disabled = false;
+            updateCaptureButtonText();
+        });
+    });
+
+    registerForm.addEventListener('submit', (event) => {
+        if (acceptedPhotos.length !== REQUIRED_CAPTURES) {
+            alert(`需要剛好 ${REQUIRED_CAPTURES} 張合格的臉部照片才能註冊。`);
+            event.preventDefault();
+            return;
+        }
+        hiddenInput.value = JSON.stringify(acceptedPhotos);
+        registerBtn.disabled = true;
+        registerBtn.textContent = '註冊中...';
+    });
+
+    setupCamera();
+
+    window.addEventListener('beforeunload', () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    });
+
+</script>
+{% endblock %}
