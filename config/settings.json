@@ -8,5 +8,6 @@
     "onnx_model_subdir": "model",
     "onnx_model_filename": "arcface_r100_v1.onnx",
     "blur_threshold": 100,
-    "ratio_diff_threshold": 0.2
+    "ratio_diff_threshold": 0.2,
+    "recognition_mode": "continuous"
 }

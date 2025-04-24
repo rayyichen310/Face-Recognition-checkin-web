@@ -4,17 +4,20 @@
 
 {% block head_extra %}
 <style>
+    /* --- 保持您原有的 CSS 樣式 --- */
     #video-container {
-        position: relative;
-        width: 640px; /* Or your desired width */
-        height: 480px; /* Or your desired height */
+        position: relative; /* 為了讓 canvas 絕對定位 */
+        width: 640px; /* 或您希望的寬度 */
+        height: 480px; /* 或您希望的高度 */
         margin: 20px auto;
         border: 1px solid #ccc;
+        overflow: hidden; /* 避免 canvas 超出邊界 */
     }
     #videoElement {
+        display: block; /* 避免底部多餘空間 */
         width: 100%;
         height: 100%;
-        object-fit: cover; /* Cover the container */
+        object-fit: cover; /* 覆蓋容器 */
     }
     #overlay {
         position: absolute;
@@ -22,22 +25,15 @@
         left: 0;
         width: 100%;
         height: 100%;
-        pointer-events: none; /* Allow clicks to go through to video if needed */
+        pointer-events: none; /* 允許點擊穿透 */
     }
-    .bbox {
-        position: absolute;
-        border: 2px solid red;
-        box-sizing: border-box;
+    /* ... 其他您需要的樣式 ... */
+    #status { /* 下方狀態框 */
+        text-align: center;
+        margin-top: 10px;
+        font-weight: bold;
     }
-    .bbox-label {
-        position: absolute;
-        background-color: red;
-        color: white;
-        font-size: 12px;
-        padding: 2px 4px;
-        white-space: nowrap;
-    }
-    #status {
+     #recognized-name { /* 上方打卡狀態框 */
         text-align: center;
         margin-top: 10px;
         font-weight: bold;
@@ -52,8 +48,10 @@
     <video id="videoElement" autoplay playsinline></video>
     <canvas id="overlay"></canvas>
 </div>
+<!-- 下方辨識狀態顯示 -->
 <div id="status" class="alert alert-info" role="alert">正在啟動攝影機...</div>
-<div id="recognized-name" class="alert alert-secondary" role="alert">辨識結果：</div>
+<!-- 上方打卡狀態顯示 -->
+<div id="recognized-name" class="alert alert-secondary" role="alert">打卡狀態：等待辨識...</div>
 
 <div class="text-center mt-3">
     <button id="checkInBtn" class="btn btn-success" disabled>上班打卡</button>
@@ -67,51 +65,93 @@
     const video = document.getElementById('videoElement');
     const overlay = document.getElementById('overlay');
     const overlayCtx = overlay.getContext('2d');
-    const statusDiv = document.getElementById('status'); // 下方框 (將顯示辨識狀態)
-    const recognizedNameElement = document.getElementById('recognized-name'); // 上方框 (將顯示打卡狀態)
+    const statusDiv = document.getElementById('status'); // 下方框 (辨識狀態)
+    const recognizedNameElement = document.getElementById('recognized-name'); // 上方框 (打卡狀態)
     const checkInBtn = document.getElementById('checkInBtn');
     const checkOutBtn = document.getElementById('checkOutBtn');
     let currentRecognizedName = null;
     let stream = null;
     let latestPositions = [];
     let latestTexts = [];
-    let lastRecognitionStatus = 'pending';
+    let lastRecognitionStatus = 'pending'; // 'pending', 'success', 'failed_request', 'error'
     let recognizeIntervalId = null;
     let updateStatusIntervalId = null;
 
+    // --- 狀態管理 ---
+    let recognitionState = 'SEARCHING'; // 'SEARCHING', 'LOCKED', 'POST_CHECKIN_RECOGNIZING', 'ERROR'
+
+    // --- 從後端獲取辨識模式設定 ---
+    const recognitionMode = "{{ recognition_mode | default('continuous') }}";
+    console.log("辨識模式:", recognitionMode); // 在控制台確認模式
+
     async function setupCamera() {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } }); 
+            // 使用較低解析度
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
             video.srcObject = stream;
             video.onloadedmetadata = () => {
+                // 確保 video 尺寸確定後再設定 canvas 尺寸
                 overlay.width = video.videoWidth;
                 overlay.height = video.videoHeight;
+                // 調整 video-container 尺寸以匹配實際視訊比例 (可選)
+                const container = document.getElementById('video-container');
+                container.style.height = `${container.offsetWidth * (video.videoHeight / video.videoWidth)}px`;
+
                 // 初始狀態調整
-                recognizedNameElement.textContent = '打卡狀態：等待辨識...'; // 上方框初始文字
-                recognizedNameElement.className = 'alert alert-info'; // 上方框初始樣式
-                statusDiv.textContent = '辨識結果：正在啟動...'; // 下方框初始文字
-                statusDiv.className = 'alert alert-info'; // 下方框初始樣式
+                recognizedNameElement.textContent = '打卡狀態：等待辨識...';
+                recognizedNameElement.className = 'alert alert-info';
+                statusDiv.textContent = '辨識結果：正在啟動...';
+                statusDiv.className = 'alert alert-info';
                 checkInBtn.disabled = true;
                 checkOutBtn.disabled = true;
 
-                recognizeIntervalId = setInterval(recognizeFrame, 3500);
-                updateStatusIntervalId = setInterval(updateStatusDisplay, 1000);
+                // --- 重設狀態並啟動計時器 ---
+                recognitionState = 'SEARCHING';
+                startRecognitionInterval(); // 根據模式啟動
+                if (updateStatusIntervalId) clearInterval(updateStatusIntervalId);
+                updateStatusIntervalId = setInterval(updateStatusDisplay, 1000); // 持續更新狀態顯示
             };
         } catch (err) {
-            console.error("Error accessing camera: ", err);
-            // 錯誤狀態調整
-            recognizedNameElement.textContent = '打卡狀態：錯誤'; // 上方框
-            recognizedNameElement.className = 'alert alert-danger'; // 上方框
-            statusDiv.textContent = '辨識結果：無法啟動攝影機: ' + err.message; // 下方框
-            statusDiv.className = 'alert alert-danger'; // 下方框
+            console.error("無法啟動攝影機: ", err);
+            recognizedNameElement.textContent = '打卡狀態：錯誤';
+            recognizedNameElement.className = 'alert alert-danger';
+            statusDiv.textContent = '辨識結果：無法啟動攝影機: ' + err.message;
+            statusDiv.className = 'alert alert-danger';
             lastRecognitionStatus = 'error';
+            recognitionState = 'ERROR';
             checkInBtn.disabled = true;
             checkOutBtn.disabled = true;
+            stopRecognitionInterval();
+            if (updateStatusIntervalId) clearInterval(updateStatusIntervalId);
+        }
+    }
+
+    // --- 計時器輔助函數 ---
+    function startRecognitionInterval() {
+        // 只有在 SEARCHING 狀態且計時器未啟動時才啟動
+        if (recognitionState === 'SEARCHING' && !recognizeIntervalId) {
+            console.log("啟動辨識計時器...");
+            // 使用較長的間隔以降低負載
+            recognizeIntervalId = setInterval(recognizeFrame, 300);
+        }
+    }
+
+    function stopRecognitionInterval() {
+        if (recognizeIntervalId) {
+            console.log("停止辨識計時器...");
+            clearInterval(recognizeIntervalId);
+            recognizeIntervalId = null;
         }
     }
 
     function drawBoundingBoxes() {
         overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+        // --- 如果是鎖定模式且狀態為 LOCKED，則不繪製 ---
+        if (recognitionMode === 'lock_on' && recognitionState === 'LOCKED') {
+            return; // 在鎖定狀態下不繪製邊界框
+        }
+
         const positions = latestPositions;
         const texts = latestTexts;
 
@@ -129,33 +169,48 @@
                     }
                 }
 
-                if (position && position.length === 4) {
-                    const [x1, y1, x2, y2] = position;
-                    const width = x2 - x1;
-                    const height = y2 - y1;
-                    const color = (name === "Unknown" || name.includes("Error")) ? 'yellow' : 'lime';
-
-                    overlayCtx.strokeStyle = color;
-                    overlayCtx.lineWidth = 2;
-                    overlayCtx.strokeRect(x1, y1, width, height);
-
-                    const label = `${name}${similarity ? ': ' + similarity : ''}`;
-                    overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                    overlayCtx.font = '16px Arial';
-                    const textMetrics = overlayCtx.measureText(label);
-                    const textHeight = 16;
-                    const bgPadding = 2;
-
-                    overlayCtx.fillRect(
-                        x1,
-                        y1 > (textHeight + bgPadding * 2) ? y1 - textHeight - bgPadding * 2 : y1 + bgPadding,
-                        textMetrics.width + bgPadding * 2,
-                        textHeight + bgPadding
-                    );
-
-                    overlayCtx.fillStyle = color;
-                    overlayCtx.fillText(label, x1 + bgPadding, y1 > (textHeight + bgPadding * 2) ? y1 - bgPadding : y1 + textHeight);
+                let x1, y1, x2, y2;
+                if (Array.isArray(position) && position.length === 4) {
+                    [x1, y1, x2, y2] = position;
+                } else if (typeof position === 'object' && position !== null && 'x1' in position) {
+                    ({ x1, y1, x2, y2 } = position);
+                } else {
+                    return; // 跳過無效位置
                 }
+
+                const width = x2 - x1;
+                const height = y2 - y1;
+                if (width <= 0 || height <= 0) return; // 跳過無效尺寸
+
+                const color = (name === "Unknown" || name.includes("Error")) ? 'yellow' : 'lime';
+
+                overlayCtx.strokeStyle = color;
+                overlayCtx.lineWidth = 2;
+                overlayCtx.strokeRect(x1, y1, width, height);
+
+                const label = `${name}${similarity ? ': ' + similarity : ''}`;
+                overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                overlayCtx.font = '16px Arial';
+                const textMetrics = overlayCtx.measureText(label);
+                const textHeight = 16;
+                const bgPadding = 2;
+
+                let labelY = y1 - bgPadding;
+                let textY = y1 - bgPadding - (textHeight / 4);
+                if (labelY < (textHeight + bgPadding)) {
+                    labelY = y2 + bgPadding;
+                    textY = y2 + bgPadding + textHeight - (textHeight / 4);
+                }
+
+                overlayCtx.fillRect(
+                    x1,
+                    labelY - textHeight,
+                    textMetrics.width + bgPadding * 2,
+                    textHeight + bgPadding
+                );
+
+                overlayCtx.fillStyle = color;
+                overlayCtx.fillText(label, x1 + bgPadding, textY);
             });
         }
     }
@@ -178,55 +233,84 @@
              });
         }
 
-        if (lastRecognitionStatus === 'failed_request') {
-             currentRecognizedName = null;
-             statusDiv.textContent = '辨識結果：請求失敗'; // <--- 更新下方框文字
-             recognizedNameElement.className = 'alert alert-warning'; // <--- 更新上方框 class
-             checkInBtn.disabled = true;
-             checkOutBtn.disabled = true;
-        } else if (lastRecognitionStatus === 'error' && !(stream && stream.active)) {
-             currentRecognizedName = null;
-             statusDiv.textContent = '辨識結果：攝影機錯誤'; // <--- 更新下方框文字
-             recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
-             checkInBtn.disabled = true;
-             checkOutBtn.disabled = true;
-        } else if (lastRecognitionStatus === 'error') {
-             currentRecognizedName = null;
-             statusDiv.textContent = '辨識結果：錯誤'; // <--- 更新下方框文字
-             recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
-             checkInBtn.disabled = true;
-             checkOutBtn.disabled = true;
-        } else if (foundRecognized) {
+        // --- 更新按鈕狀態 (通用邏輯) ---
+        if (foundRecognized) {
             currentRecognizedName = primaryName;
-            statusDiv.textContent = `辨識結果：${primaryName} (辨識完成)`; // <--- 更新下方框文字
-            recognizedNameElement.className = 'alert alert-success'; // <--- 更新上方框 class
             checkInBtn.disabled = false;
             checkOutBtn.disabled = false;
-        } else if (texts && texts.some(t => t && t.includes("Unknown"))) {
+        } else {
             currentRecognizedName = null;
-            statusDiv.textContent = '辨識結果：Unknown (未辨識到已知人員)'; // <--- 更新下方框文字
-            recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
             checkInBtn.disabled = true;
             checkOutBtn.disabled = true;
-        } else if (texts && texts.length === 0 && positions && positions.length === 0 && lastRecognitionStatus === 'success') {
-             currentRecognizedName = null;
-             statusDiv.textContent = '辨識結果：未偵測到人臉'; // <--- 更新下方框文字
-             recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
-             checkInBtn.disabled = true;
-             checkOutBtn.disabled = true;
-        } else if (lastRecognitionStatus === 'pending' || (lastRecognitionStatus === 'success' && texts.length === 0 && positions.length === 0)) {
-             currentRecognizedName = null;
-             statusDiv.textContent = '辨識結果：正在辨識...'; // <--- 更新下方框文字
-             recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
-             checkInBtn.disabled = true;
-             checkOutBtn.disabled = true;
         }
-        if (!recognizedNameElement.textContent.startsWith('打卡狀態：')) {
-             recognizedNameElement.textContent = '打卡狀態：等待操作...';
+
+        // --- 更新下方狀態文字 (根據狀態) ---
+        let statusText = '';
+        let statusClass = 'alert alert-info';
+
+        switch (recognitionState) {
+            case 'ERROR':
+                statusText = '辨識結果：錯誤';
+                statusClass = 'alert alert-danger';
+                break;
+            case 'LOCKED':
+                statusText = `辨識結果：已鎖定 ${currentRecognizedName || '使用者'}`;
+                statusClass = 'alert alert-success';
+                break;
+            case 'SEARCHING':
+            case 'POST_CHECKIN_RECOGNIZING':
+                if (lastRecognitionStatus === 'failed_request') {
+                    statusText = '辨識結果：請求失敗';
+                    statusClass = 'alert alert-warning';
+                } else if (lastRecognitionStatus === 'error') {
+                    statusText = '辨識結果：處理錯誤';
+                    statusClass = 'alert alert-danger';
+                } else if (foundRecognized && recognitionState !== 'POST_CHECKIN_RECOGNIZING') {
+                    statusText = `辨識結果：${primaryName} (辨識完成)`;
+                    statusClass = 'alert alert-success';
+                } else if (texts && texts.some(t => t && t.includes("Unknown"))) {
+                    statusText = '辨識結果：Unknown (未辨識到已知人員)';
+                } else if (texts && texts.length === 0 && positions && positions.length === 0 && lastRecognitionStatus === 'success') {
+                    statusText = '辨識結果：未偵測到人臉';
+                } else {
+                    statusText = '辨識結果：正在辨識...';
+                }
+                break;
+            default:
+                statusText = '辨識結果：未知狀態';
+                statusClass = 'alert alert-secondary';
+        }
+
+        statusDiv.textContent = statusText;
+        statusDiv.className = statusClass;
+
+        // --- 更新上方打卡狀態文字 (如果尚未被覆蓋) ---
+        // 只有在辨識成功且狀態不是 LOCKED 或 POST_CHECKIN 時，才顯示 "等待操作"
+        if (foundRecognized && recognitionState !== 'LOCKED' && recognitionState !== 'POST_CHECKIN_RECOGNIZING') {
+             if (!recognizedNameElement.textContent.startsWith('打卡狀態：')) { // 避免覆蓋打卡訊息
+                 recognizedNameElement.textContent = '打卡狀態：等待操作...';
+                 recognizedNameElement.className = 'alert alert-info';
+             }
+        } else if (!foundRecognized && recognitionState !== 'LOCKED') {
+             if (!recognizedNameElement.textContent.startsWith('打卡狀態：')) {
+                 recognizedNameElement.textContent = '打卡狀態：等待辨識...';
+                 recognizedNameElement.className = 'alert alert-info';
+             }
+        } else if (recognitionState === 'LOCKED') {
+             if (!recognizedNameElement.textContent.startsWith('打卡狀態：')) {
+                 recognizedNameElement.textContent = `打卡狀態：已鎖定 ${currentRecognizedName || '使用者'}，請打卡`;
+                 recognizedNameElement.className = 'alert alert-success';
+             }
         }
     }
 
     async function recognizeFrame() {
+        // --- 檢查模式和狀態 ---
+        if (recognitionMode === 'lock_on' && recognitionState === 'LOCKED') {
+            console.log("狀態為 LOCKED，跳過辨識請求。");
+            return;
+        }
+
         if (!video || video.readyState < video.HAVE_METADATA || video.paused || video.ended) {
             return;
         }
@@ -234,9 +318,12 @@
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
+        if (canvas.width <= 0 || canvas.height <= 0) return; // 再次檢查
         const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg');
+
+        let wasPostCheckin = (recognitionState === 'POST_CHECKIN_RECOGNIZING');
 
         try {
             const response = await fetch('/recognize', {
@@ -246,38 +333,75 @@
             });
 
             if (!response.ok) {
-                console.error('Recognition request failed:', response.statusText);
+                console.error('辨識請求失敗:', response.status, response.statusText);
                 lastRecognitionStatus = 'failed_request';
                 latestPositions = [];
                 latestTexts = [];
+                recognitionState = 'SEARCHING'; // 失敗時回到搜尋
+                startRecognitionInterval(); // 確保計時器運行
             } else {
                 const data = await response.json();
                 latestPositions = data.positions || [];
                 latestTexts = data.texts || [];
                 lastRecognitionStatus = 'success';
+
+                // --- 狀態轉換邏輯 ---
+                let foundRecognized = false;
+                let primaryName = null;
+                if (latestTexts && latestTexts.length > 0) {
+                    latestTexts.forEach((text) => {
+                        if (!primaryName && text && typeof text === 'string') {
+                            const name = text.split(':')[0].trim();
+                            if (name !== "Unknown" && !name.includes("Error")) {
+                                primaryName = name;
+                                foundRecognized = true;
+                            }
+                        }
+                    });
+                }
+
+                if (recognitionMode === 'lock_on') {
+                    if (foundRecognized) {
+                        console.log(`辨識到 ${primaryName}，設定狀態為 LOCKED。`);
+                        recognitionState = 'LOCKED';
+                        stopRecognitionInterval(); // 停止定時辨識
+                    } else {
+                        console.log("未找到已知使用者，設定狀態為 SEARCHING。");
+                        recognitionState = 'SEARCHING';
+                        startRecognitionInterval(); // 確保計時器運行
+                    }
+                } else { // Continuous mode
+                    recognitionState = 'SEARCHING'; // 保持搜尋
+                }
             }
 
         } catch (error) {
-            console.error('Error sending frame for recognition:', error);
+            console.error('發送幀進行辨識時出錯:', error);
             lastRecognitionStatus = 'error';
             latestPositions = [];
             latestTexts = [];
+            recognitionState = 'SEARCHING'; // 出錯時回到搜尋
+            startRecognitionInterval(); // 確保計時器運行
         } finally {
-             drawBoundingBoxes();
+             drawBoundingBoxes(); // 繪製 (或在鎖定時不繪製)
+             if (wasPostCheckin && recognitionState !== 'LOCKED') {
+                 startRecognitionInterval(); // 如果打卡後掃描未鎖定，重啟計時器
+             }
+             updateStatusDisplay(); // 更新狀態顯示
         }
     }
 
     async function sendCheckIn(type) {
         if (!currentRecognizedName) {
-            recognizedNameElement.textContent = '打卡狀態：無法打卡，未辨識到有效人員。'; // <--- 更新上方框文字
-            recognizedNameElement.className = 'alert alert-warning'; // <--- 更新上方框 class
+            recognizedNameElement.textContent = '打卡狀態：無法打卡，未辨識到有效人員。';
+            recognizedNameElement.className = 'alert alert-warning';
             return;
         }
 
         checkInBtn.disabled = true;
         checkOutBtn.disabled = true;
-        recognizedNameElement.textContent = `打卡狀態：正在為 ${currentRecognizedName} 執行打${type === 'in' ? '卡' : '卡'}...`; // <--- 更新上方框文字
-        recognizedNameElement.className = 'alert alert-info'; // <--- 更新上方框 class
+        recognizedNameElement.textContent = `打卡狀態：正在為 ${currentRecognizedName} 執行打${type === 'in' ? '卡' : '卡'}...`;
+        recognizedNameElement.className = 'alert alert-info';
 
         try {
             const response = await fetch('/check_in', {
@@ -288,28 +412,41 @@
             const data = await response.json();
 
             if (data.status === 'success') {
-                recognizedNameElement.textContent = `打卡狀態：${data.message}`; // <--- 更新上方框文字 (顯示成功訊息)
-                recognizedNameElement.className = 'alert alert-success'; // <--- 更新上方框 class
+                recognizedNameElement.textContent = `打卡狀態：${data.message}`;
+                recognizedNameElement.className = 'alert alert-success';
             } else {
-                recognizedNameElement.textContent = `打卡狀態：打卡失敗: ${data.message}`; // <--- 更新上方框文字 (顯示失敗訊息)
-                recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
-                updateStatusDisplay();
+                recognizedNameElement.textContent = `打卡狀態：打卡失敗: ${data.message}`;
+                recognizedNameElement.className = 'alert alert-danger';
             }
         } catch (error) {
-            console.error('Error sending check-in:', error);
-            recognizedNameElement.textContent = '打卡狀態：打卡請求失敗'; // <--- 更新上方框文字 (顯示請求失敗訊息)
-            recognizedNameElement.className = 'alert alert-danger'; // <--- 更新上方框 class
-            updateStatusDisplay();
+            console.error('發送打卡請求時出錯:', error);
+            recognizedNameElement.textContent = '打卡狀態：打卡請求失敗';
+            recognizedNameElement.className = 'alert alert-danger';
+        } finally {
+            // --- 打卡後處理 ---
+            if (recognitionMode === 'lock_on') {
+                console.log("打卡完成，設定狀態為 POST_CHECKIN_RECOGNIZING 並觸發掃描。");
+                recognitionState = 'POST_CHECKIN_RECOGNIZING';
+                latestPositions = []; // 清除舊框
+                latestTexts = [];
+                drawBoundingBoxes(); // 清除畫布
+                recognizeFrame(); // 立即觸發一次辨識
+            } else {
+                 // 連續模式下，不需要特別處理，讓計時器繼續
+                 updateStatusDisplay(); // 更新顯示即可
+            }
         }
     }
 
     checkInBtn.addEventListener('click', () => sendCheckIn('in'));
     checkOutBtn.addEventListener('click', () => sendCheckIn('out'));
 
+    // 初始啟動
     setupCamera();
 
+    // 清理資源
     window.addEventListener('beforeunload', () => {
-        if (recognizeIntervalId) clearInterval(recognizeIntervalId);
+        stopRecognitionInterval();
         if (updateStatusIntervalId) clearInterval(updateStatusIntervalId);
         if (stream) {
             stream.getTracks().forEach(track => track.stop());

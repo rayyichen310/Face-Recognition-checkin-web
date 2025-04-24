@@ -200,9 +200,12 @@ def index():
                            is_admin=session.get('is_admin'))
 
 @app.route('/live_checkin')
+# @login_required # 如果需要登入才能訪問，請取消註解
 def live_checkin():
-    """提供即時打卡頁面。"""
-    return render_template('live_checkin.html')
+    """提供即時打卡頁面，並傳遞辨識模式設定。"""
+    # --- 從全域 settings 獲取當前模式並傳遞給模板 ---
+    current_mode = settings.get('recognition_mode', 'continuous') # 使用 .get 提供預設值
+    return render_template('live_checkin.html', recognition_mode=current_mode) # <-- 修改此行
 
 @app.route('/recognize', methods=['POST'])
 def recognize_face():

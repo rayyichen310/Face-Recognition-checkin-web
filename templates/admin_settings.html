@@ -6,20 +6,18 @@
 <div class="container mt-4">
     <h2 class="mb-4">應用程式設定</h2>
 
-    <!-- **** 直接嵌入 Flash 訊息顯示邏輯 **** -->
+    <!-- **** Flash 訊息顯示 **** -->
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category if category else 'info' }} alert-dismissible fade show" role="alert">
             {{ message }}
-            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
-              <span aria-hidden="true">&times;</span>
-            </button>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button> {# 使用 Bootstrap 5 的 close button #}
           </div>
         {% endfor %}
       {% endif %}
     {% endwith %}
-    <!-- **** 結束嵌入 **** -->
+    <!-- **** 結束 Flash **** -->
 
     <div class="alert alert-warning" role="alert">
         <strong>注意：</strong> 更改某些設定（例如模型路徑、資料庫路徑、偵測/追蹤信心度）可能需要重新啟動伺服器才能完全生效。
@@ -36,8 +34,8 @@
                 </tr>
             </thead>
             <tbody>
-                {# --- 只顯示指定的設定項 --- #}
-                {% set allowed_keys = ['blur_threshold', 'ratio_diff_threshold', 'recognition_threshold', 'min_detection_confidence', 'min_tracking_confidence', 'onnx_model_filename'] %}
+                {# --- 修改：加入 recognition_mode --- #}
+                {% set allowed_keys = ['blur_threshold', 'ratio_diff_threshold', 'recognition_threshold', 'min_detection_confidence', 'min_tracking_confidence', 'onnx_model_filename', 'recognition_mode'] %}
                 {% for key, value in current_settings.items() %}
                   {% if key in allowed_keys %}
                     <tr>
@@ -50,8 +48,23 @@
                         <td><code>{{ value }}</code></td>
                         <td><code>{{ value.__class__.__name__ }}</code></td>
                         <td>
-                            {% if value is boolean %}
-                                <select class="form-control" name="{{ key }}">
+                            {# --- 新增：recognition_mode 的特殊處理 --- #}
+                            {% if key == 'recognition_mode' %}
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="{{ key }}" id="mode_continuous" value="continuous" {% if value == 'continuous' %}checked{% endif %}>
+                                    <label class="form-check-label" for="mode_continuous">
+                                        持續辨識 (Continuous)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="{{ key }}" id="mode_lock_on" value="lock_on" {% if value == 'lock_on' %}checked{% endif %}>
+                                    <label class="form-check-label" for="mode_lock_on">
+                                        鎖定辨識 (Lock-on)
+                                    </label>
+                                </div>
+                            {# --- 結束 recognition_mode 處理 --- #}
+                            {% elif value is boolean %}
+                                <select class="form-select" name="{{ key }}"> {# 使用 form-select for BS5 #}
                                     <option value="True" {% if value %}selected{% endif %}>True</option>
                                     <option value="False" {% if not value %}selected{% endif %}>False</option>
                                 </select>
@@ -63,14 +76,13 @@
                                 {% else %}
                                     <input type="number" step="any" class="form-control" name="{{ key }}" value="{{ value }}">
                                 {% endif %}
-                            {% else %}
+                            {% else %} {# 預設為文字輸入 #}
                                 <input type="text" class="form-control" name="{{ key }}" value="{{ value }}">
                             {% endif %}
                         </td>
                     </tr>
                   {% endif %}
                 {% endfor %}
-                {# --- 結束只顯示指定的設定項 --- #}
             </tbody>
         </table>
         <button type="submit" class="btn btn-primary">儲存變更</button>
