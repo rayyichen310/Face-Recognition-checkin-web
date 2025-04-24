@@ -131,8 +131,20 @@
         // 只有在 SEARCHING 狀態且計時器未啟動時才啟動
         if (recognitionState === 'SEARCHING' && !recognizeIntervalId) {
             console.log("啟動辨識計時器...");
-            // 使用較長的間隔以降低負載
-            recognizeIntervalId = setInterval(recognizeFrame, 300);
+
+            let intervalDuration; // 宣告一個變數來儲存間隔時間
+
+            // 根據 recognitionMode 決定間隔時間
+            if (recognitionMode === 'lock_on') {
+                intervalDuration = 5000; // lock_on 模式使用 5000ms
+                console.log("偵測到 Lock-on 模式，設定間隔為 5000ms。");
+            } else {
+                intervalDuration = 300; // 其他模式使用預設的 300ms
+                console.log("偵測到 Continuous 模式，設定間隔為 300ms。");
+            }
+
+            // 使用決定的間隔時間來啟動計時器
+            recognizeIntervalId = setInterval(recognizeFrame, intervalDuration);
         }
     }
 
