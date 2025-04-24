@@ -3,11 +3,11 @@
     "db_filename": "face_embeddings.db",
     "image_source_dirname": "dataset",
     "recognition_threshold": 0.5,
-    "min_detection_confidence": 0.5,
+    "min_detection_confidence": 0.6,
     "min_tracking_confidence": 0.5,
     "onnx_model_subdir": "model",
     "onnx_model_filename": "MobileFaceNet.onnx",
     "blur_threshold": 100,
     "ratio_diff_threshold": 0.2,
-    "recognition_mode": "lock_on"
+    "recognition_mode": "continuous"
 }

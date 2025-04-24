@@ -12,6 +12,12 @@ database/*
 dataset/*
 !dataset/.gitkeep
 
+database/*
+!database/.gitkeep
+
+config/*
+!config/.gitkeep
+
 .vscode/
 .idea/
 .DS_Store
