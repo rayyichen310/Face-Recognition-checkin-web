@@ -125,19 +125,17 @@ def initialize_database_tables(db_file: str = db_path):
 
 # --- Face Embeddings ---
 def add_face_embedding(conn: sqlite3.Connection, name: str, embedding: np.ndarray, source_image_path: Optional[str] = None) -> Optional[int]:
-    """將人臉嵌入新增到資料庫。"""
+    """將人臉嵌入新增到資料庫 (不管理事務)。"""
     sql = ''' INSERT INTO face_embeddings(name, embedding, source_image_path)
               VALUES(?,?,?) '''
     cur = conn.cursor()
     try:
         cur.execute(sql, (name, embedding, source_image_path))
-        conn.commit()
-        logging.info(f"Added face embedding for '{name}'. ID: {cur.lastrowid}")
-        return cur.lastrowid
+        logging.info(f"Prepared insert for face embedding for '{name}'.")
+        return cur.lastrowid # 返回 ID 表示準備成功
     except Error as e:
-        logging.error(f"Error adding face embedding for '{name}': {e}", exc_info=True)
-        conn.rollback()
-        return None
+        logging.error(f"Error preparing insert for face embedding for '{name}': {e}", exc_info=True)
+        raise e # 將錯誤向上拋出，讓呼叫者處理回滾
 
 def get_all_embeddings(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     """查詢所有臉部嵌入，並確保嵌入是 NumPy 陣列。"""
@@ -202,23 +200,20 @@ def get_check_ins_by_username(conn: sqlite3.Connection, username: str) -> List[D
 
 # --- Users ---
 def add_user(conn: sqlite3.Connection, username: str, password_hash: str, is_admin: bool = False) -> Optional[int]:
-    """新增使用者到 users 表格。"""
+    """新增使用者到 users 表格 (不管理事務)。"""
     sql = ''' INSERT INTO users(username, password_hash, is_admin)
               VALUES(?,?,?) '''
     cur = conn.cursor()
     try:
         cur.execute(sql, (username, password_hash, 1 if is_admin else 0))
-        conn.commit()
-        logging.info(f"User '{username}' added successfully. ID: {cur.lastrowid}")
-        return cur.lastrowid
-    except sqlite3.IntegrityError:
-        logging.warning(f"Attempted to add existing username '{username}'.")
-        conn.rollback()
-        return None
+        logging.info(f"Prepared insert for user '{username}'.")
+        return cur.lastrowid # 返回 ID 表示準備成功
+    except sqlite3.IntegrityError as e: # 捕捉特定錯誤
+        logging.warning(f"Integrity error likely due to duplicate username '{username}'.")
+        raise e # 將錯誤向上拋出，讓呼叫者處理回滾
     except Error as e:
-        logging.error(f"Error adding user '{username}': {e}", exc_info=True)
-        conn.rollback()
-        return None
+        logging.error(f"Error preparing insert for user '{username}': {e}", exc_info=True)
+        raise e # 將錯誤向上拋出
 
 def get_user_by_username(conn: sqlite3.Connection, username: str) -> Optional[Dict[str, Any]]:
     """根據使用者名稱查詢使用者。"""
