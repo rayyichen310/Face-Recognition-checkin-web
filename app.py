@@ -627,6 +627,7 @@ def handle_admin_user_post(conn, form_data, file_data):
             hashed_password = generate_password_hash(password)
             try:
                 if add_user(conn, username, hashed_password, is_admin):
+                    conn.commit()
                     flash(f'使用者 {username} 新增成功。', 'success')
                 else:
                     flash(f'新增使用者 {username} 失敗 (可能名稱已存在)。', 'danger')
@@ -671,6 +672,7 @@ def handle_admin_user_post(conn, form_data, file_data):
                     source_path = image_file.filename
 
                     if add_face_embedding(conn, username, feature, source_path):
+                        conn.commit()
                         flash(f'成功為使用者 {username} 添加臉部特徵。', 'success')
                     else:
                         flash(f'為使用者 {username} 添加臉部特徵失敗 (資料庫錯誤)。', 'danger')
