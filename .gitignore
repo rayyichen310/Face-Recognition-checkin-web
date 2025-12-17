@@ -24,3 +24,12 @@ config/*
 Thumbs.db
 .env
 secrets.json
+
+# Ignore virtual environment
+venv/
+env/
+
+# Ignore SSL certificates
+*.pem
+*.key
+*.crt

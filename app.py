@@ -365,14 +365,34 @@ def register():
             if i == 0: first_image_bgr = img_bgr # 儲存第一張圖片
 
             try:
-                img_rgb, detections = face_detect_bgr(img_bgr, detector)
+                # 轉換為 RGB 進行偵測
+                img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                # 使用 MediaPipe 處理圖片
+                img_rgb.flags.writeable = False
+                results = detector.process(img_rgb)
+                img_rgb.flags.writeable = True
+
+                detections = []
+                if results.multi_face_landmarks:
+                    for face_landmarks in results.multi_face_landmarks:
+                        # 這裡需要重新實作 _calculate_bbox 和 _extract_5_landmarks 的邏輯
+                        # 或者直接調用 face_detect_bgr，但要注意它會再次轉換顏色
+                        # 為了避免重複轉換，我們直接調用 face_detect_bgr 並傳入 BGR 圖像
+                        pass
+                
+                # 重新調用 face_detect_bgr (它內部會處理 BGR->RGB)
+                _, detections = face_detect_bgr(img_bgr, detector)
+
                 if not detections or len(detections) != 1:
                     logging.error(f"Detection error on pre-validated image {i+1} for {username}.")
                     flash(f'處理第 {i+1} 張已驗證的照片時發生偵測錯誤。', 'danger')
                     return redirect(url_for('register'))
 
-                # feature_extract 需要 BGR 影像
-                _, _, list_of_embeddings = feature_extract(img_bgr, detections, sess)
+                # feature_extract 需要 RGB 影像 (因為我們在 face_detect_bgr 裡轉過一次了，但 feature_extract 預期 RGB)
+                # 注意：feature_extract 的 docstring 說 img_rgb，但內部 face_align 預期 RGB
+                # 我們需要確保傳入的是 RGB
+                img_rgb_for_extract = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                _, _, list_of_embeddings = feature_extract(img_rgb_for_extract, detections, sess)
 
                 if list_of_embeddings and list_of_embeddings[0] is not None:
                     processed_embeddings.append(list_of_embeddings[0])
@@ -664,8 +684,9 @@ def handle_admin_user_post(conn, form_data, file_data):
             elif len(detections) > 1:
                 flash('照片中偵測到多張臉，請上傳只有一張臉的照片。', 'warning')
             else:
-                # 提取特徵
-                _, _, list_of_embeddings = feature_extract(img_bgr, detections, sess)
+                # 提取特徵 (確保傳入 RGB)
+                img_rgb_for_extract = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+                _, _, list_of_embeddings = feature_extract(img_rgb_for_extract, detections, sess)
 
                 if list_of_embeddings and list_of_embeddings[0] is not None:
                     feature = list_of_embeddings[0]
@@ -673,6 +694,8 @@ def handle_admin_user_post(conn, form_data, file_data):
 
                     if add_face_embedding(conn, username, feature, source_path):
                         conn.commit()
+                        # 嘗試儲存為個人照片
+                        save_profile_photo(username, img_bgr)
                         flash(f'成功為使用者 {username} 添加臉部特徵。', 'success')
                     else:
                         flash(f'為使用者 {username} 添加臉部特徵失敗 (資料庫錯誤)。', 'danger')

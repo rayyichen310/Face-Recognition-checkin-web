@@ -53,6 +53,7 @@ def feature_extract(img_rgb: np.ndarray, detections: List[Dict[str, Any]], sess:
 
         # 2. 預處理
         input_proc = np.transpose(aligned_face_rgb, (2, 0, 1)).astype(np.float32)
+        input_proc = (input_proc - 127.5) / 127.5
         input_blob = np.expand_dims(input_proc, axis=0)
 
         # 3. ONNX 推理
